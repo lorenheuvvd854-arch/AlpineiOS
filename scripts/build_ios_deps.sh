@@ -3,7 +3,12 @@
 # Cross-compile libffi, GLib and libslirp for arm64-apple-ios into ios/deps/.
 set -euo pipefail
 
-export PATH="/opt/homebrew/bin:$HOME/.cargo/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.cargo/bin:$PATH"
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3)}"
+if [ -z "$PYTHON_BIN" ]; then
+    echo "python3 not found" >&2
+    exit 1
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK_DEPS="$ROOT/work/ios_deps_build"
@@ -91,7 +96,7 @@ ranlib = ['$RANLIB']
 strip = ['$STRIP', '-x']
 pkg-config = ['$PKG_CONFIG']
 pkgconfig = ['$PKG_CONFIG']
-python = ['/opt/homebrew/bin/python3']
+python = ['$PYTHON_BIN']
 [host_machine]
 system = '$system'
 EOF
