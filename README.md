@@ -42,7 +42,7 @@ On the first launch, choose the apps you want and tap **Download and install**. 
 
 Open **Installation log** to see download stages, transferred bytes and Linux package output. The log stays available after errors and can be shared from its toolbar. During Linux setup, tap the installation status at the bottom of the screen to open it.
 
-The installer keeps the screen awake while it works, resumes interrupted transfers instead of starting the image over, and retries transient network errors with backoff. The speed indicator is a live sample, so a lock-screen pause no longer makes the remaining time jump.
+The installer keeps the screen awake while it works and retries transient network errors with backoff. It attempts to resume interrupted transfers when iOS provides usable resume data; otherwise a file may restart. The speed indicator resets its sample after a long pause. These changes have not yet been tested on an iPhone.
 
 Set `ALPINE_IMAGE_MANIFEST_URL` at build time to use a different default URL. To create and stage the assets for your own server, run these commands on an Apple silicon Mac with QEMU and Python installed.
 
