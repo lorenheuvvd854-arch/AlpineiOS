@@ -16,7 +16,7 @@ trap 'rm -f "$SETUP"' EXIT
 if $downloadable; then
     printf 'ALPINEIOS_DOWNLOADABLE=1\n' > "$SETUP"
 fi
-cat scripts/guest/install_phosh.sh scripts/guest/enable_native_display.sh >> "$SETUP"
+cat scripts/guest/install_phosh.sh scripts/guest/enable_native_display.sh scripts/guest/tune_boot.sh >> "$SETUP"
 if $downloadable; then
     cat scripts/guest/enable_app_installer.sh >> "$SETUP"
 fi
