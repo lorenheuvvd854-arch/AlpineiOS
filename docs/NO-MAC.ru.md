@@ -47,7 +47,9 @@ StikDebug общается с отладочным сервисом iOS, поэ�
 
 1. Скачайте готовый IPA: <https://github.com/Lumid-Off/AlpineiOS/releases>.
    Берите `AlpineiOS-v0.2.1-alpha-unsigned.ipa` (или более новый unsigned-релиз).
-   Если в форке появится собственный релиз, можно использовать и его.
+   Собственную сборку форка можно взять в GitHub Actions:
+   **Actions → Build unsigned IPA → Run workflow**, затем скачать artifact
+   `AlpineiOS-unsigned-ipa`. Сборка занимает около часа и не требует Mac.
 2. Установите IPA через SideStore/AltStore/Sideloadly. Инструмент подпишет его
    вашим сертификатом; приложение получит entitlement `get-task-allow`, без
    которого StikDebug не сможет включить JIT.
@@ -87,6 +89,7 @@ StikDebug общается с отладочным сервисом iOS, поэ�
 ## Чего этот способ не даёт
 
 - Он не убирает JIT и не ускоряет эмуляцию сам по себе.
-- Он не позволяет собрать приложение без Mac — только запустить уже собранное.
+- CI собирает unsigned IPA без Mac, но подписать его Apple ID всё равно нужно
+  через SideStore/AltStore/Sideloadly — без подписи приложение не установится.
 - Бесплатный Apple ID требует переподписи каждые 7 дней и ограничивает число
   приложений.

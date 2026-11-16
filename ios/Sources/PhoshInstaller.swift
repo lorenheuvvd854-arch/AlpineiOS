@@ -33,6 +33,7 @@ struct PhoshInstaller {
 
     private final class RedirectPolicy: NSObject, URLSessionDownloadDelegate {
         private let progress: (@Sendable (Int64) -> Void)?
+        private let resumeData: Data?
         private var lastProgress = Date.distantPast
         private let transferLock = NSLock()
         private var continuation: CheckedContinuation<(URL, URLResponse), Error>?
@@ -41,16 +42,32 @@ struct PhoshInstaller {
         private var downloadedFile: URL?
         private var fileError: Error?
         private var cancelled = false
+        private var storedResumeData: Data?
+        var pendingResumeData: Data? {
+            transferLock.lock()
+            defer { transferLock.unlock() }
+            return storedResumeData
+        }
 
-        init(progress: (@Sendable (Int64) -> Void)? = nil) { self.progress = progress }
+        init(progress: (@Sendable (Int64) -> Void)? = nil, resumeData: Data? = nil) {
+            self.progress = progress
+            self.resumeData = resumeData
+        }
 
         func download(from url: URL) async throws -> (URL, URLResponse) {
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
                     transferLock.lock()
                     self.continuation = continuation
-                    let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
-                    let task = session.downloadTask(with: url)
+                    let configuration = URLSessionConfiguration.default
+                    // Long image downloads must survive short Wi-Fi drops and lock-screen suspension
+                    // instead of failing the whole transfer.
+                    configuration.waitsForConnectivity = true
+                    configuration.timeoutIntervalForRequest = 60
+                    configuration.timeoutIntervalForResource = 60 * 60 * 6
+                    let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+                    let task = self.resumeData.map { session.downloadTask(withResumeData: $0) }
+                        ?? session.downloadTask(with: url)
                     self.session = session
                     self.task = task
                     let cancel = cancelled
@@ -77,7 +94,9 @@ struct PhoshInstaller {
         }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            let resumeData = (error as NSError?)?.userInfo[NSURLSessionDownloadTaskResumeData] as? Data
             transferLock.lock()
+            storedResumeData = resumeData
             let continuation = self.continuation
             self.continuation = nil
             self.task = nil
@@ -209,6 +228,70 @@ struct PhoshInstaller {
         return nil
     }
 
+    private final class ProgressTracker: @unchecked Sendable {
+        private let lock = NSLock()
+        private var highest: Int64 = 0
+
+        func update(_ value: Int64) -> Int64 {
+            lock.lock()
+            defer { lock.unlock() }
+            highest = max(highest, value)
+            return highest
+        }
+    }
+
+    private static let transientErrors: Set<URLError.Code> = [
+        .timedOut, .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,
+        .cannotFindHost, .dnsLookupFailed, .resourceUnavailable, .secureConnectionFailed,
+        .badServerResponse, .internationalRoamingOff, .dataNotAllowed,
+    ]
+
+    private static func retryDelay(_ attempt: Int) async throws {
+        let seconds = min(8, 1 << (attempt - 1))
+        try await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+    }
+
+    /// Downloads a single file, retrying transient network failures and temporary HTTP errors.
+    /// Each attempt uses a fresh delegate so no state leaks between retries.
+    private static func fetch(
+        _ url: URL,
+        label: String,
+        progress: (@Sendable (Int64) -> Void)? = nil,
+        attempts: Int = 4
+    ) async throws -> (URL, URLResponse) {
+        var lastError: Error = SetupError.downloadFailed(label)
+        var resumeData: Data?
+        let report: (@Sendable (Int64) -> Void)?
+        if let progress {
+            let box = ProgressTracker()
+            report = { progress(box.update($0)) }
+        } else {
+            report = nil
+        }
+        for attempt in 1...attempts {
+            try Task.checkCancellation()
+            let policy = RedirectPolicy(progress: report, resumeData: resumeData)
+            do {
+                let (file, response) = try await policy.download(from: url)
+                let status = (response as? HTTPURLResponse)?.statusCode
+                if let status, status == 429 || (500...599).contains(status) {
+                    try? FileManager.default.removeItem(at: file)
+                    lastError = SetupError.downloadFailed(label)
+                    resumeData = nil
+                    guard attempt < attempts else { throw lastError }
+                } else {
+                    return (file, response)
+                }
+            } catch let error as URLError where transientErrors.contains(error.code) {
+                lastError = error
+                resumeData = policy.pendingResumeData ?? resumeData
+                guard attempt < attempts else { throw error }
+            }
+            try await retryDelay(attempt)
+        }
+        throw lastError
+    }
+
     @MainActor
     static func install(
         address: String,
@@ -234,9 +317,8 @@ struct PhoshInstaller {
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: staging) }
 
-        let redirects = RedirectPolicy()
         update("Reading image manifest…")
-        let (manifestFile, manifestResponse) = try await redirects.download(from: source)
+        let (manifestFile, manifestResponse) = try await fetch(source, label: "manifest")
         defer { try? fm.removeItem(at: manifestFile) }
         guard let response = manifestResponse as? HTTPURLResponse, response.statusCode == 200,
               let manifestURL = response.url, sourceURL(manifestURL.absoluteString) != nil,
@@ -266,19 +348,18 @@ struct PhoshInstaller {
             let url = source.deletingLastPathComponent().appendingPathComponent(name)
             update("Downloading \(name) (\(index + 1)/\(names.count))…")
             let previousBytes = completedBytes
-            let downloadDelegate = RedirectPolicy { received in
+            let (download, response) = try await fetch(url, label: name) { received in
                 Task { @MainActor in
                     progress(previousBytes + min(received, asset.bytes), downloadBytes)
                 }
             }
-            let (download, response) = try await downloadDelegate.download(from: url)
-            completedBytes += asset.bytes
-            progress(completedBytes, downloadBytes)
             defer { try? fm.removeItem(at: download) }
             guard let http = response as? HTTPURLResponse, http.statusCode == 200,
                   let finalURL = http.url, sourceURL(finalURL.absoluteString) != nil else {
                 throw SetupError.downloadFailed(name)
             }
+            completedBytes += asset.bytes
+            progress(completedBytes, downloadBytes)
             update("Verifying \(name)…")
             let valid = try await Task.detached(priority: .utility) {
                 try verify(download, against: asset)

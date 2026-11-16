@@ -27,24 +27,40 @@ final class VMViewModel: ObservableObject {
 
     private func updateDownloadProgress(_ received: Int64, total: Int64) {
         let fraction = total > 0 ? Double(received) / Double(total) : 0
-        downloadProgress = min(1, fraction)
+        downloadProgress = min(1, max(0, fraction))
         let format: (Int64) -> String = { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
         downloadBytesText = "\(format(received)) / \(format(total))"
         lastDownloadActivity = Date()
         let now = ProcessInfo.processInfo.systemUptime
         let elapsed = now - lastDownloadSampleTime
-        if elapsed >= 0.3, received > lastDownloadSampleBytes {
-            let sample = Double(received - lastDownloadSampleBytes) / elapsed
-            downloadBytesPerSecond = downloadBytesPerSecond == 0 ? sample : 0.3 * sample + 0.7 * downloadBytesPerSecond
+        let restarted = received < lastDownloadSampleBytes
+        // A retry or a lock-screen pause makes the gap between samples huge. Rebase the
+        // measurement instead of averaging the pause into a near-zero download speed.
+        if elapsed < 0 || elapsed > 2 || restarted {
             lastDownloadSampleTime = now
             lastDownloadSampleBytes = received
-            downloadSpeedText = "\(format(Int64(downloadBytesPerSecond)))/s"
-            let seconds = Int(Double(max(0, total - received)) / downloadBytesPerSecond)
-            if seconds >= 60 {
-                downloadRemainingText = "About \(max(1, (seconds + 30) / 60)) min remaining"
-            } else {
-                downloadRemainingText = "About \(max(1, seconds)) sec remaining"
+            if restarted || elapsed > 2 {
+                downloadBytesPerSecond = 0
+                downloadSpeedText = nil
+                downloadRemainingText = nil
             }
+            return
+        }
+        guard elapsed >= 0.3, received > lastDownloadSampleBytes else { return }
+        let sample = Double(received - lastDownloadSampleBytes) / elapsed
+        if sample.isFinite, sample > 0 {
+            downloadBytesPerSecond = downloadBytesPerSecond == 0 ? sample : 0.3 * sample + 0.7 * downloadBytesPerSecond
+        }
+        lastDownloadSampleTime = now
+        lastDownloadSampleBytes = received
+        guard downloadBytesPerSecond.isFinite, downloadBytesPerSecond > 1 else { return }
+        downloadSpeedText = "\(format(Int64(downloadBytesPerSecond)))/s"
+        let remaining = min(Double(max(0, total - received)) / downloadBytesPerSecond, 24 * 60 * 60)
+        let seconds = max(0, Int(remaining))
+        if seconds >= 60 {
+            downloadRemainingText = "About \(max(1, (seconds + 30) / 60)) min remaining"
+        } else {
+            downloadRemainingText = "About \(max(1, seconds)) sec remaining"
         }
     }
 
@@ -54,6 +70,12 @@ final class VMViewModel: ObservableObject {
         downloadSpeedText = nil
         downloadRemainingText = nil
         lastDownloadActivity = nil
+    }
+
+    private func updateIdleTimer() {
+        // Auto-lock suspends the app mid-transfer and used to look like a download speed
+        // collapse. Keep the display on while installing or while the guest is running.
+        UIApplication.shared.isIdleTimerDisabled = installTask != nil || isVMRunning || isUnpacking
     }
     @Published private(set) var installationLog = ""
     private let installLogURL = URL.applicationSupportDirectory.appendingPathComponent("AlpineiOS/installation.log")
@@ -135,6 +157,7 @@ final class VMViewModel: ObservableObject {
             softwareStatus = status
             if softwareStatus == .ready { PhoshInstaller.clearRequest() }
         }
+        updateIdleTimer()
     }
 
     func onAppBecameActive() {
@@ -208,6 +231,7 @@ final class VMViewModel: ObservableObject {
                 clearDownloadProgress()
                 logInstallation("Image verified and installed. Starting Linux.")
                 startOrRetry()
+                updateIdleTimer()
             } catch {
                 if !(error is CancellationError) && (error as? URLError)?.code != .cancelled {
                     imageError = error.localizedDescription
@@ -218,9 +242,11 @@ final class VMViewModel: ObservableObject {
                 clearDownloadProgress()
                 imageStatus = nil
                 installTask = nil
+                updateIdleTimer()
                 syncFromBridge()
             }
         }
+        updateIdleTimer()
     }
 
     func cancelDownload() { installTask?.cancel() }

@@ -24,6 +24,11 @@ Building needs macOS, but running does not: a sideloaded development-signed buil
 can enable JIT on the phone itself with StikDebug. See
 [docs/NO-MAC.ru.md](docs/NO-MAC.ru.md) (Russian).
 
+The fork also has a GitHub Actions workflow (`.github/workflows/build-ipa.yml`)
+that builds an unsigned IPA on a macOS runner without a local Mac. Start it from
+the **Actions** tab; the IPA is attached to the run as an artifact. CI takes the
+Mesa VirGL guest driver from the upstream signed IPA, so no QEMU/HVF is needed.
+
 The VM cannot run without JIT. The engine translates guest ARM64 code into host
 ARM64 code and needs executable pages, so a debugger-blessed JIT region is part
 of the execution model, not an optional accelerator. A true no-JIT build would
@@ -36,6 +41,8 @@ replacement.
 On the first launch, choose the apps you want and tap **Download and install**. The default image is hosted on GitHub Releases. [Phosh image downloads](https://github.com/Lumid-Off/AlpineiOS-images/releases/tag/phosh-26.06-r1) AlpineiOS verifies the assets with SHA-256, unpacks the disk, then boots when JIT is available. The guest downloads the selected apps after boot. You can choose a local password for `user` and `doas`, or leave it blank to generate one. The current password is in **Help**.
 
 Open **Installation log** to see download stages, transferred bytes and Linux package output. The log stays available after errors and can be shared from its toolbar. During Linux setup, tap the installation status at the bottom of the screen to open it.
+
+The installer keeps the screen awake while it works, resumes interrupted transfers instead of starting the image over, and retries transient network errors with backoff. The speed indicator is a live sample, so a lock-screen pause no longer makes the remaining time jump.
 
 Set `ALPINE_IMAGE_MANIFEST_URL` at build time to use a different default URL. To create and stage the assets for your own server, run these commands on an Apple silicon Mac with QEMU and Python installed.
 

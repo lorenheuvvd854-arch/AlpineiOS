@@ -1,0 +1,85 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Check out the fork
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          brew install meson ninja pkg-config xcodegen python
+          ls -l /opt/homebrew/bin/python3
+
+      - name: Restore native dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/deps
+            work/downloads
+            work/ios_deps_build
+          key: ios-deps-${{ runner.os }}-${{ hashFiles('scripts/build_ios_deps.sh', 'scripts/prepare_ios_graphics.py') }}
+
+      - name: Build third-party libraries and host frameworks
+        run: |
+          set -euo pipefail
+          if [ ! -f ios/deps/lib/libglib-2.0.a ] || [ ! -d ios/deps/Frameworks/virglrenderer.1.framework ]; then
+            bash scripts/build_ios_deps.sh
+            python3 scripts/prepare_ios_graphics.py
+          else
+            echo "Using cached iOS dependencies"
+          fi
+
+      - name: Stage guest VirGL driver from the upstream IPA
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          ipa=work/AlpineiOS-upstream.ipa
+          curl -fL --retry 3 -o "$ipa" \
+            https://github.com/Lumid-Off/AlpineiOS/releases/download/v0.2.1-alpha/AlpineiOS-v0.2.1-alpha-unsigned.ipa
+          unzip -p "$ipa" Payload/WindowsiOS.app/guest-virgl.tar.gz > work/guest-virgl.tar.gz
+          unzip -p "$ipa" Payload/WindowsiOS.app/guest-virgl.sha256 > work/guest-virgl.sha256
+          expected="$(tr -d '[:space:]' < work/guest-virgl.sha256)"
+          actual="$(shasum -a 256 work/guest-virgl.tar.gz | awk '{print $1}')"
+          test "$expected" = "$actual"
+          python3 scripts/prepare_guest_graphics.py --stage work/guest-virgl.tar.gz
+
+      - name: Build the VM static library
+        run: make -j"$(sysctl -n hw.ncpu)" ios-lib
+
+      - name: Generate the Xcode project
+        run: xcodegen generate --spec ios/project.yml
+
+      - name: Build the app without signing
+        run: |
+          xcodebuild -project ios/WindowsiOS.xcodeproj -scheme WindowsiOS \
+            -configuration Release -sdk iphoneos -derivedDataPath build/DerivedData \
+            PRODUCT_BUNDLE_IDENTIFIER=local.alpineios.app \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+      - name: Package the IPA
+        run: |
+          set -euo pipefail
+          rm -rf build/ipa
+          mkdir -p build/ipa/Payload
+          ditto build/DerivedData/Build/Products/Release-iphoneos/WindowsiOS.app build/ipa/Payload/WindowsiOS.app
+          python3 scripts/package_ipa.py build/ipa/Payload/WindowsiOS.app build/AlpineiOS-unsigned.ipa
+          shasum -a 256 build/AlpineiOS-unsigned.ipa
+
+      - name: Upload the IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: AlpineiOS-unsigned-ipa
+          path: build/AlpineiOS-unsigned.ipa
+          if-no-files-found: error
