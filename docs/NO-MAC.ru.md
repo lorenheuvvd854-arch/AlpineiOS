@@ -45,8 +45,9 @@ StikDebug общается с отладочным сервисом iOS, поэ�
 
 ### 3. Установка AlpineiOS
 
-1. Скачайте `AlpineiOS.ipa` из раздела **Releases** этого форка (или соберите
-   сами на Mac).
+1. Скачайте готовый IPA: <https://github.com/Lumid-Off/AlpineiOS/releases>.
+   Берите `AlpineiOS-v0.2.1-alpha-unsigned.ipa` (или более новый unsigned-релиз).
+   Если в форке появится собственный релиз, можно использовать и его.
 2. Установите IPA через SideStore/AltStore/Sideloadly. Инструмент подпишет его
    вашим сертификатом; приложение получит entitlement `get-task-allow`, без
    которого StikDebug не сможет включить JIT.
