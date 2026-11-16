@@ -18,6 +18,19 @@ The experimental build bundles a Mesa 26.1.6 guest driver with VirGL enabled. Th
 
 The download includes Phosh and Settings. Firefox, Files (Nautilus), and GNOME Console are selected by default. Telegram Desktop, Mousepad, and htop are optional.
 
+## Running without a Mac, and the JIT requirement
+
+Building needs macOS, but running does not: a sideloaded development-signed build
+can enable JIT on the phone itself with StikDebug. See
+[docs/NO-MAC.ru.md](docs/NO-MAC.ru.md) (Russian).
+
+The VM cannot run without JIT. The engine translates guest ARM64 code into host
+ARM64 code and needs executable pages, so a debugger-blessed JIT region is part
+of the execution model, not an optional accelerator. A true no-JIT build would
+require an ARM64 interpreter backend; [docs/NO-JIT.ru.md](docs/NO-JIT.ru.md)
+explains the scope and why Kernarium's UML approach is not a drop-in
+replacement.
+
 ## Download and install from the app
 
 On the first launch, choose the apps you want and tap **Download and install**. The default image is hosted on GitHub Releases. [Phosh image downloads](https://github.com/Lumid-Off/AlpineiOS-images/releases/tag/phosh-26.06-r1) AlpineiOS verifies the assets with SHA-256, unpacks the disk, then boots when JIT is available. The guest downloads the selected apps after boot. You can choose a local password for `user` and `doas`, or leave it blank to generate one. The current password is in **Help**.
