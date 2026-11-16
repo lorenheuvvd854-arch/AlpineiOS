@@ -36,7 +36,7 @@ struct PhoshSetupView: View {
                         if let bytes = vm.downloadBytesText {
                             Text(bytes).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                         }
-                        if let activity = vm.lastDownloadActivity {
+                        if let activity = vm.lastDownloadActivity, status.hasPrefix("Downloading") {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 if context.date.timeIntervalSince(activity) > 5 {
                                     Text("0 B/s · Waiting for data…")
